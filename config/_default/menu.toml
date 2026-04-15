@@ -18,7 +18,16 @@
 [[social]]
     identifier = "twitter"
     name       = "Twitter"
-    url        = "hhttps://x.com/Sniperpigeon_SR"
+    url        = "https://x.com/Sniperpigeon_SR"
 
     [social.params]
         icon = "brand-twitter"
+
+[[social]]
+    identifier = "soundcloud"
+    name       = "SoundCloud"
+    url        = "https://soundcloud.com/sniperpigeon"
+
+    [social.params]
+        icon = "brand-soundcloud"
+

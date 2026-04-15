@@ -1,6 +1,6 @@
 ---
-title: Example Category
-description: A description of this category
+title: General
+description: 一般性的帖子，也许也有公告
 image:
 
 # Badge style
