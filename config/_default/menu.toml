@@ -29,5 +29,5 @@
     url        = "https://soundcloud.com/sniperpigeon"
 
     [social.params]
-        icon = "soundcloud.png"
+        icon = "soundcloud"
 
