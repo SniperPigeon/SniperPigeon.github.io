@@ -1,5 +1,5 @@
 ---
-title: RoboSkiAgent: 用 LLM 驱动工业机器人
+title: "RoboSkiAgent: 用 LLM 驱动工业机器人"
 description: 用 LLM 驱动工业机器人：从工程实现到 Fine-Tuning 研究的探索
 slug: skiagent
 date: 2026-04-15 15:35:00+0800
