@@ -1,11 +1,15 @@
-+++
-date = '2026-04-15T18:39:28+08:00'
-draft = false
-title = 'First Post'
-categories: ["General"]
-tags: ["General"]
-+++
-# Nihao!
+---
+title: Hello World
+description: 总之是第一篇文章
+slug: hello-world
+date: 2026-04-15 13:45:00+0800
+image: cover.jpg
+categories:
+    - General
+tags:
+    - 公告
+---
+## Nihao!
 
 どうも
 
