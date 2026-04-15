@@ -2,7 +2,7 @@
 mainSections = ["post"]
 # Output page's full content in RSS.
 rssFullContent = true
-favicon        = "img/favicon.png"
+favicon        = "img/harukasan.ico"
 
 # Accepted values: "default", "lastmod"
 # default = see https://gohugo.io/quick-reference/glossary/#default-sort-order
@@ -18,9 +18,9 @@ SortBy              = "default"
     lastUpdated = ":date_full"
 
 [sidebar]
-    emoji    = "🍥"
-    subtitle = "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
-    avatar   = "img/avatar.png"
+    emoji    = "🎵"
+    subtitle = "Little birds can remember."
+    avatar   = "img/avatar.jpg"
 
 [article]
     headingAnchor = false
