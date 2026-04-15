@@ -5,7 +5,7 @@ slug: skiagent
 date: 2026-04-15 15:35:00+0800
 image: system_architecture.png
 categories:
-    - Tech Notes
+    - tech
 tags:
     - Robotics
     - LangChain
