@@ -22,6 +22,7 @@ tags:
 对于模型选择上，暂定使用DINOv3+Head+SupCon Loss进行后训练调试。不过对于数据的筛选，打算使用对齐非常好的CLIP，针对复杂的图片（例如车辆正面，侧面，内饰，原理图，这些杂七杂八的图片都散布在Wiki Commons上，需要人工提取出来，即使用文件名匹配效果也不好）进行标记并分类。分类粒度暂定为系列，即不区分番台或仅区分差异较大或家族过于庞大的车型（例如E231系和他的无数孩子们）
 
 ---
+
 ## 数据集阶段
 
 一次性提取所有数据实在太痛苦，暂时分为几个阶段
@@ -160,3 +161,317 @@ all_model["commons_cats"]   = commons_cats       # 返回的 category 列表
 
 空结果的条目还留在表里，等人工过一遍——区分「确实没有 Commons category」和「前缀转换有误」两种情况，要么合并进去自己改然后再匹配。
 下一步是对每个 category 递归拉取子 category 和图片 URL，然后进入异步批量下载。
+
+---
+
+## Commons 分类清洗与根分类寻找
+
+### Root Category
+
+前面只是拿到了 Commons 的候选 category，但很快发现一个问题：`allcategories(acprefix=...)` 返回的列表并不等于“**这个车型应该使用的最终分类**”。它只是前缀搜索结果，里面可能混着：
+
+- 车型主类
+- 子型号
+- 番台
+- 涂装
+- 运营会社分类
+- 博物馆保存车
+- 车站照片
+- 内饰/部件
+
+例如 キハ20系 搜 JNR Kiha 20 会得到：
+
+>JNR Kiha 20
+>JNR Kiha 20 series
+>JNR Kiha 20 series (Hokkaido)
+
+差点直接用第一个结果，但这其实是错的。日文 label 是 キハ20系，语义上应该对应整个 family，也就是 JNR Kiha 20 series。JNR Kiha 20 反而是其中一个具体车型。所以我们应该找series。吗？
+
+虽然不在第一阶段（JR东+JR货物，为什么多了个JR货物？等会就知道了），但是有一个逆天的：
+> JR West 521 -> JR West 521 series
+好吧，看起来他们根本没关心命名规则。反正哭的是我。最后和codex拉了一套规则出来，其实就是从规则到发现特例，返工回去打补丁的循环。
+
+1. 先生成搜索 prefix。
+2. 用 Commons allcategories 搜候选。
+3. 如果有 exact match，默认用 exact。
+4. 如果同时存在 prefix 和 prefix series，再查父子关系。
+5. 只有当 prefix series 是 prefix 的 parent，或者 prefix 是 prefix series 的 child 时，才提升到 series。
+6. 空结果和弱匹配保留给人工补。
+
+大概的代码：
+
+```python
+def _promote_to_series(series_label, exact, series_cat):
+    if not series_label.endswith("系"):
+        return False
+
+    exact_parents = fetch_parent_categories(exact) or []
+    if series_cat in exact_parents:
+        return True
+
+    series_children = fetch_subcategories(series_cat) or []
+    if exact in series_children:
+        return True
+
+    return False
+```
+
+
+这样 `キハ20系`、`キハ40系` 会被提升到：
+
+```text
+JNR Kiha 20 series
+JNR Kiha 40 series
+```
+
+而 `E231系` 会保持：
+
+```text
+JR East E231
+```
+
+### 蒸爷来了 
+
+然后蒸汽机车又单独给我上了一课。
+
+普通国铁机车大多可以搜：
+
+```text
+JNR EF64
+JNR DD51
+```
+
+但蒸汽机车不是。比如 `C57形`，Commons是：`C57 steam locomotives`
+
+注意**还是复数**。直接搜 `C57 steam locomotive` 会返回一堆：
+
+```text
+C57 steam locomotives
+C57 steam locomotives by number
+C57 steam locomotives in service
+```
+
+甚至有些型号会先返回单车、部件、车轮：
+
+```text
+D51 steam locomotive backheads
+D51 steam locomotive wheels
+D51 steam locomotives
+```
+
+所以对 `蒸気機関車` 单独加了 prefix：
+
+```python
+if series_type == "蒸気機関車":
+    prefixes.append(f"{name} steam locomotive")
+```
+
+然后在 root 选择时，如果候选里有 `prefix + "s"`，优先选复数主类：
+
+```python
+plural = f"{prefix}s"
+if plural in candidates:
+    return plural
+```
+
+## 多运营者问题：root 和 operator_roots 分开
+
+其实是发现为什么EF510这个JR货的车搜出来第一个选项却是JR东的EF510-500番台？哦原来是因为JR东拿他们拉北斗星。而倒霉的是，`JR Freight EF510`和 `JR East EF510-500`**是两个根category**。
+
+你说你是不是有病？
+
+于是我把JR货也加进来第一阶段，希望先思考出来如何解决这个问题。如果只保留一个 `commons_root_category`，就会很尴尬：
+
+- 选 `JR Freight EF510`：车型 family 对了，但 JR East 的图片会被漏掉。
+- 选 `JR East EF510-500`：当前 JR East row 对了，但车型总体又太窄。
+
+所以我最后把数据结构改成：
+
+```python
+commons_root_category = "JR Freight EF510"
+
+commons_operator_roots = {
+    "JR East": "JR East EF510-500",
+    "JR Freight": "JR Freight EF510",
+}
+```
+
+也就是说：
+
+- `commons_root_category` 表示车型总体入口。
+- `commons_operator_roots` 表示按运营者细分时的入口。
+
+这样以后如果做“全 JR 数据集”，同一车型合并成一行也行，照顾一下之后多阶段分类的需求。
+
+
+## 从 CSV 到 SQLite Manifest
+
+确定 root category 后，下一步不是马上下载图片，而是先做一个 manifest 数据库。毕竟从wikipedia服务器上薅上万张图片总不可能一次性跑通，一定要有断点续传之类的。
+所以我们可以先把manifest搞下来然后用它管理下载进度。
+
+于是建了一个 SQLite：
+
+```text
+data/commons_image_manifest.sqlite
+```
+
+目前有三张表：
+
+```text
+categories
+images
+image_categories
+```
+
+其中 `images` 是核心表，存图片级 metadata：
+
+```text
+series
+root_category
+category
+category_path_json
+file_title
+image_url
+thumb_url
+mime
+width
+height
+size
+sha1
+excluded
+exclude_reason
+download_status
+downloaded_path
+```
+
+这里有几个设计点。
+
+### 保留 File: 前缀
+
+Commons API 返回的文件标题是：
+
+```text
+File:E231 Niitsu+Kawaju.jpg
+```
+
+我一开始也想把 `File:` 去掉，但后来决定数据库里保留。因为这是 Commons 的标准 page title，后续继续查 API 时可以直接用：
+
+```text
+titles=File:E231 Niitsu+Kawaju.jpg
+```
+
+真正下载到本地时，再加上SHA1哈希的前几位生成一个清洗后的文件名。
+
+
+### category_path_json
+
+递归 subcategory 时，我没有单独建复杂的 graph 表。Commons category 本身是 DAG，不是树。同一个 category 可能从不同路径出现。比如 Kiha 40：
+
+```text
+JNR Kiha 40 series
+  -> JNR Kiha 40
+    -> Kiha 40 (JR West)
+
+JNR Kiha 40 series
+  -> JNR Kiha 40 series (JR West)
+    -> Kiha 40 (JR West)
+```
+
+对，他可以出现在第二，第三层。不过这不重要，结构化的处理过滤根本没用，这种直接要把整个category trace丢给LLM分析，他很擅长这个。所以我其实只需要整个trace，存储成flatten就好了。
+
+所以直接在 `images` 里存：
+
+```json
+["JNR Kiha 40 series", "JNR Kiha 40", "Kiha 40 (JR West)"]
+```
+
+字段叫：
+
+```text
+category_path_json
+```
+
+root-only 时就是：
+
+```json
+["JR East E231"]
+```
+
+这样既简单，又保留了足够上下文。
+
+### 断点续传
+
+失败时打印原因：
+
+```text
+↻ File:test.jpg: HTTP 429, retry in 3.0s (1/3)
+✗ File:test.jpg: ConnectError: ...
+```
+
+用指数退避避免被封控，礼貌点不要请求太多了。
+
+## 目前的状态
+
+现在已经可以完成一个小pipeline：
+
+1. 从车型 CSV 读取 `commons_root_category`
+2. 按 root category 抓图片 metadata
+3. 可选递归 subcategory
+4. 写入 SQLite manifest
+5. 过滤明显内饰/部件图片
+6. 下载少量图片到 `data/img`
+7. 把下载状态写回数据库
+
+例如测试样本：
+
+```python
+collection_manifest = crawl_root_manifest_sample(
+    ["E231系", "キハ40系", "EF510形"],
+    max_files_per_category=3,
+    max_depth=1,
+)
+download_result = download_manifest_dataframe(collection_manifest, limit=200)
+```
+
+现在比较明显的下一步是图片清洗。因为 Commons 里面混进来的东西实在太多：
+
+- 车辆外观
+- 车站停靠照
+- 编组局部
+- 内饰
+- 座席
+- 车轮
+- 铭牌
+- 博物馆展品
+- 模型
+- 原理图
+- 方向幕
+
+文件名规则只能挡掉一部分。比如英文 `wheel` 可以过滤，但日文 `動輪` 就还没处理。之后应该扩展一批规则，再用 CLIP 或其他视觉模型对图片内容做二次筛选。
+
+粗略计划是：
+
+1. 先用规则过滤明显错误：
+   - `interior`
+   - `seat`
+   - `cab`
+   - `wheel`
+   - `parts`
+   - `車内`
+   - `座席`
+   - `運転台`
+   - `動輪`
+2. 再用 CLIP 打标签：
+   - train exterior
+   - interior
+   - station scene
+   - detail/part
+   - diagram/map
+   - model/toy
+3. 最后把保留下来的图导出成 Hugging Face dataset。
+
+到这里，数据集构建终于从“找到车型列表”进入了下载的阶段。不过，属于数据清洗的工作似乎都还没真正开始。有了正确角度的图片，接下来要筛选足够大的分辨率，色彩（老照片都是黑白），还要平衡，等等。
+
+好累啊啊啊！
+
+我说做这个我能发篇conference吗？
