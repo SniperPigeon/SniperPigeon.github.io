@@ -8,7 +8,8 @@ categories:
     - tech
 tags:
     - Wikipedia Commons
-    - pandas
+    - Grounding DINO
+    - SigLIP2
     - hugging-face dataset
     - 日本铁道
     - 数据集
